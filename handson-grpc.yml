@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS traning "
+
+Resources:
+# VPC
+  HandsonVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/21
+      InstanceTenancy: default
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-vpc
+
+## InternetGateway
+  HandsonVPCIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-igw
+
+## InternetGateway Attachment
+  HandsonVPCIGWAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref HandsonVPCIGW
+      VpcId: !Ref HandsonVPC
+
+# Subnet
+  HandsonGrpcSubnet01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      VpcId: !Ref HandsonVPC
+      AvailabilityZone: !Select [0, !GetAZs ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-grpc-subnet-01
+
+# Subnet RouteTable
+  HandsonGrpcSubnet01RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref HandsonVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-grpc-routetable
+          
+# Subnet RouteTable Route
+  HandsonGrpcSubnet01Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref HandsonGrpcSubnet01RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref HandsonVPCIGW 
+
+
+# Subnet RouteTable Attachment
+  HandsonGrpcSubnet01Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref HandsonGrpcSubnet01
+      RouteTableId: !Ref HandsonGrpcSubnet01RouteTable
+
+  # Web SG
+  SecurityGroupForWebServer:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      VpcId: !Ref HandsonVPC
+      GroupName: !Sub ${AWS::StackName}-grpc-sg
+      GroupDescription: !Sub ${AWS::StackName}-grpc-sg
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-grpc-sg
+      SecurityGroupIngress:
+        # 同じVPC内からのアクセスを許可
+        - IpProtocol: "-1"      
+          CidrIp: "10.0.0.0/24"
+
+# IAM Role for SSM
+  HandsonIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      MaxSessionDuration: 3600
+      RoleName: !Sub ${AWS::StackName}-ssm-role
+      Description: Allows EC2 instances to call AWS services like CloudWatch and Systems Manager on your behalf.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+
+# Instance Profile for SSM
+  HandsonInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: "/"
+      InstanceProfileName: !Sub "${AWS::StackName}-ssm-role"
+      Roles:
+      - !Ref HandsonIAMRole
+
+  EC2gRPCServer01:
+    Type: AWS::EC2::Instance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-server-ec2
+      ImageId: ami-0c6359fd9eb30edcf
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          SubnetId: !Ref HandsonGrpcSubnet01
+          GroupSet:
+            - !Ref SecurityGroupForWebServer
+
+      IamInstanceProfile: !Ref HandsonInstanceProfile
+
+  EC2gRPCClient01:
+    Type: AWS::EC2::Instance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-client-ec2
+      ImageId: ami-0c6359fd9eb30edcf
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: true
+          DeviceIndex: '0'
+          SubnetId: !Ref HandsonGrpcSubnet01
+          GroupSet:
+            - !Ref SecurityGroupForWebServer
+      IamInstanceProfile: !Ref HandsonInstanceProfile
+
